@@ -1,4 +1,4 @@
-const CACHE_NAME = "pwa-cache-v1";
+const CACHE_NAME = "geofencing-pwa-v1";
 const LOCATION_SYNC_TAG = "location-sync";
 const PERIODIC_SYNC_TAG = "periodic-geofence-check";
 const DB_NAME = "GeofenceDB";
@@ -6,8 +6,9 @@ const STORE_NAME = "locationUpdates";
 const urlsToCache = [
   "/",
   "/index.html",
-  "/favicon.ico",
   "/manifest.json",
+  "/favicon.png",
+  "/service-worker.js",
   "/leaflet/marker-icon.png",
   "/leaflet/marker-icon-2x.png",
   "/leaflet/marker-shadow.png"
@@ -82,9 +83,7 @@ async function showNotification(title, options) {
 }
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(urlsToCache);
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache))
   );
 });
 self.addEventListener("activate", (event) => {
@@ -143,3 +142,59 @@ self.addEventListener("message", (event) => {
     event.waitUntil(storeLocationUpdate(event.data.location));
   }
 });
+self.addEventListener("periodicsync", (event) => {
+  if (event.tag === "check-geofence") {
+    event.waitUntil(checkGeofenceStatus());
+  }
+});
+async function checkGeofenceStatus() {
+  try {
+    const geofenceData = await getStoredGeofenceData();
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+        if (geofenceData && geofenceData.length > 0) {
+          geofenceData.forEach((fence) => {
+            const distance = calculateDistance(
+              latitude,
+              longitude,
+              fence.lat,
+              fence.lng
+            );
+            if (distance <= fence.radius) {
+              self.registration.showNotification("Geofence Alert", {
+                body: `You are inside the geofence: ${fence.name}`,
+                icon: "/favicon.png"
+              });
+            }
+          });
+        }
+      });
+    }
+  } catch (error) {
+    console.error("Error in background check:", error);
+  }
+}
+function calculateDistance(lat1, lon1, lat2, lon2) {
+  const R = 6371e3;
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+async function getStoredGeofenceData() {
+  try {
+    const cache = await caches.open(CACHE_NAME);
+    const response = await cache.match("geofence-data");
+    if (response) {
+      return response.json();
+    }
+    return [];
+  } catch (error) {
+    console.error("Error getting stored geofence data:", error);
+    return [];
+  }
+}

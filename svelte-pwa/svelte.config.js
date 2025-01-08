@@ -5,18 +5,11 @@ import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 const config = {
 	kit: {
 		adapter: adapter({
-			fallback: '200.html'
+			edge: false,
+			split: false
 		}),
 		prerender: {
-			handleHttpError: ({ path, referrer, message }) => {
-				// Ignore missing files during prerender
-				if (path === '/favicon.ico' || path === '/manifest.json' || path.startsWith('/images/')) {
-					return;
-				}
-				
-				// otherwise fail the build
-				throw new Error(message);
-			}
+			handleMissingId: 'ignore'
 		}
 	},
 	preprocess: vitePreprocess()

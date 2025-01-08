@@ -117,7 +117,7 @@ const options = {
   root: Root,
   service_worker: false,
   templates: {
-    app: ({ head, body, assets: assets2, nonce, env }) => '<!DOCTYPE html>\n<html lang="en">\n	<head>\n		<meta charset="utf-8" />\n		<link rel="icon" href="' + assets2 + '/favicon.ico" />\n		<link rel="manifest" href="' + assets2 + '/manifest.json" />\n		<meta name="viewport" content="width=device-width, initial-scale=1" />\n		<meta name="theme-color" content="#4CAF50" />\n		<meta name="description" content="A Progressive Web App for geofencing" />\n		' + head + '\n	</head>\n	<body data-sveltekit-preload-data="hover">\n		<div style="display: contents">' + body + "</div>\n		<script>\n			if ('serviceWorker' in navigator) {\n				window.addEventListener('load', () => {\n					navigator.serviceWorker.register('/service-worker.js')\n						.then(registration => {\n							console.log('ServiceWorker registration successful');\n						})\n						.catch(err => {\n							console.error('ServiceWorker registration failed:', err);\n						});\n				});\n			}\n		<\/script>\n	</body>\n</html>\n",
+    app: ({ head, body, assets: assets2, nonce, env }) => '<!DOCTYPE html>\n<html lang="en">\n	<head>\n		<meta charset="utf-8" />\n		<link rel="icon" href="' + assets2 + '/favicon.png" />\n		<link rel="manifest" href="' + assets2 + '/manifest.json" />\n		<meta name="viewport" content="width=device-width, initial-scale=1" />\n		<meta name="theme-color" content="#4CAF50" />\n		<meta name="description" content="A Progressive Web App for geofencing" />\n		' + head + '\n	</head>\n	<body data-sveltekit-preload-data="hover">\n		<div style="display: contents">' + body + "</div>\n		<script>\n			if ('serviceWorker' in navigator) {\n				window.addEventListener('load', () => {\n					navigator.serviceWorker.register('/service-worker.js')\n						.then(registration => {\n							console.log('ServiceWorker registration successful');\n						})\n						.catch(err => {\n							console.error('ServiceWorker registration failed:', err);\n						});\n				});\n			}\n		<\/script>\n	</body>\n</html>\n",
     error: ({ status, message }) => '<!doctype html>\n<html lang="en">\n	<head>\n		<meta charset="utf-8" />\n		<title>' + message + `</title>
 
 		<style>
@@ -189,7 +189,7 @@ const options = {
 		<div class="error">
 			<span class="status">` + status + '</span>\n			<div class="message">\n				<h1>' + message + "</h1>\n			</div>\n		</div>\n	</body>\n</html>\n"
   },
-  version_hash: "67cb7a"
+  version_hash: "cdxcl5"
 };
 async function get_hooks() {
   let handle;

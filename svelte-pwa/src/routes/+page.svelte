@@ -364,6 +364,29 @@
   }
 
   onMount(async () => {
+    if ('serviceWorker' in navigator && 'permissions' in navigator) {
+      try {
+        // Request permission for notifications
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          // Register periodic background sync
+          const registration = await navigator.serviceWorker.ready;
+          if ('periodicSync' in registration) {
+            try {
+              await registration.periodicSync.register('check-geofence', {
+                minInterval: 15 * 60 * 1000 // Minimum 15 minutes
+              });
+              console.log('Periodic background sync registered');
+            } catch (error) {
+              console.error('Error registering periodic sync:', error);
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error setting up notifications:', error);
+      }
+    }
+
     if ('Notification' in window) {
       notificationPermission = await Notification.requestPermission();
     }
