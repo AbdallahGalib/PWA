@@ -105,7 +105,7 @@
     return distance <= radius;
   }
 
-  function checkGeofences(currentPosition: Position) {
+  function checkGeofences(currentPosition: Position | null) {
     if (!currentPosition) return;
 
     const newInsideGeofences: string[] = [];
@@ -244,8 +244,37 @@
       }
 
       // Initialize the map
-      map = L.map(mapElement).setView([0, 0], 2);
+      map = L.map(mapElement, {
+        zoomControl: true, // Show zoom controls
+        keyboard: true, // Enable keyboard navigation
+        minZoom: 1, // Minimum zoom level (world view)
+        maxZoom: 22, // Maximum zoom level (very detailed street level)
+        zoomDelta: 0.5, // Allow finer zoom control
+        zoomSnap: 0.5, // Snap to 0.5 zoom levels
+        wheelDebounceTime: 40 // Smoother wheel zooming
+      }).setView([0, 0], 2);
       
+      // Add zoom level indicator
+      L.control.scale().addTo(map);
+      
+      // Create custom zoom control
+      const ZoomInfo = L.Control.extend({
+        onAdd: function(map: L.Map) {
+          const container = L.DomUtil.create('div', 'leaflet-control leaflet-control-zoom-info');
+          container.style.backgroundColor = 'white';
+          container.style.padding = '5px';
+          container.style.margin = '10px';
+          container.style.border = '2px solid rgba(0,0,0,0.2)';
+          container.style.borderRadius = '4px';
+          container.innerHTML = `Zoom: ${map.getZoom()}`;
+          map.on('zoomend', () => {
+            container.innerHTML = `Zoom: ${map.getZoom()}`;
+          });
+          return container;
+        }
+      });
+      new ZoomInfo({ position: 'bottomleft' }).addTo(map);
+
       // Add tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: ' OpenStreetMap contributors'
@@ -259,6 +288,7 @@
       const drawControl = new L.Control.Draw({
         draw: {
           polyline: false,
+          rectangle: false,  // Disable rectangle
           polygon: {
             allowIntersection: false,
             shapeOptions: {
@@ -274,26 +304,10 @@
               fillOpacity: 0.2
             }
           },
-          rectangle: {
-            shapeOptions: {
-              color: '#4CAF50',
-              fillColor: '#4CAF50',
-              fillOpacity: 0.2
-            }
-          },
-          marker: false,
-          circlemarker: false
+          marker: false
         },
         edit: {
-          featureGroup: drawnItems,
-          remove: true,
-          edit: {
-            selectedPathOptions: {
-              color: '#FFA500',
-              fillColor: '#FFA500',
-              fillOpacity: 0.2
-            }
-          }
+          featureGroup: drawnItems
         }
       });
 
@@ -465,10 +479,40 @@
     }
   }
 
-  function deleteGeofence(name: string): void {
+  let editingGeofence: string | null = null;
+  let newGeofenceName: string = '';
+
+  function deleteGeofence(name: string) {
+    const geofence = geofences.get(name);
+    if (geofence && geofence.layer) {
+      drawnItems.removeLayer(geofence.layer);
+    }
     geofences.delete(name);
-    geofences = geofences; // trigger reactivity
-    status = `Deleted geofence: ${name}`;
+    geofences = geofences; // Trigger Svelte reactivity
+    checkGeofences(position);
+  }
+
+  function startEditingGeofence(name: string) {
+    editingGeofence = name;
+    const geofence = geofences.get(name);
+    if (geofence) {
+      newGeofenceName = geofence.name;
+    }
+  }
+
+  function saveGeofenceEdit() {
+    if (editingGeofence && newGeofenceName && newGeofenceName !== editingGeofence) {
+      const geofence = geofences.get(editingGeofence);
+      if (geofence) {
+        geofences.delete(editingGeofence);
+        geofence.name = newGeofenceName;
+        geofences.set(newGeofenceName, geofence);
+        geofences = geofences; // Trigger Svelte reactivity
+        checkGeofences(position);
+      }
+    }
+    editingGeofence = null;
+    newGeofenceName = '';
   }
 
   onMount(async () => {
@@ -597,8 +641,27 @@
           {:else}
             {#each Array.from(geofences) as [name, _]}
               <div class="geofence-item">
-                <span>{name}</span>
-                <button class="danger-btn" on:click={() => deleteGeofence(name)}>Delete</button>
+                {#if editingGeofence === name}
+                  <input
+                    type="text"
+                    bind:value={newGeofenceName}
+                    placeholder="Enter new name"
+                    class="rename-input"
+                  />
+                  <div class="button-group">
+                    <button class="success-btn" on:click={saveGeofenceEdit}>Save</button>
+                    <button class="secondary-btn" on:click={() => {
+                      editingGeofence = null;
+                      newGeofenceName = '';
+                    }}>Cancel</button>
+                  </div>
+                {:else}
+                  <span>{name}</span>
+                  <div class="button-group">
+                    <button class="edit-btn" on:click={() => startEditingGeofence(name)}>Rename</button>
+                    <button class="danger-btn" on:click={() => deleteGeofence(name)}>Delete</button>
+                  </div>
+                {/if}
               </div>
             {/each}
           {/if}
@@ -1023,5 +1086,41 @@
 
   :global(.custom-draw-button:hover) {
     background: #f4f4f4;
+  }
+
+  .geofence-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem;
+    margin: 0.5rem 0;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+  }
+
+  .button-group {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .rename-input {
+    flex: 1;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    margin-right: 0.5rem;
+  }
+
+  .edit-btn {
+    background-color: #2196F3;
+    color: white;
+    border: none;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .edit-btn:hover {
+    background-color: #1976D2;
   }
 </style>

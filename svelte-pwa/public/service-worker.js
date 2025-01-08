@@ -1,4 +1,4 @@
-const CACHE_NAME = 'geofence-pwa-v1';
+const CACHE_NAME = 'svelte-pwa-v1';
 const LOCATION_SYNC_TAG = 'location-sync';
 const PERIODIC_SYNC_TAG = 'periodic-geofence-check';
 const DB_NAME = 'GeofenceDB';
@@ -7,10 +7,11 @@ const STORE_NAME = 'locationUpdates';
 const urlsToCache = [
   '/',
   '/index.html',
-  '/global.css',
-  '/build/bundle.css',
-  '/build/bundle.js',
-  'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png'
+  '/manifest.json',
+  '/vite.svg',
+  '/assets/main-4xXvW1dQ.css',
+  '/assets/main-CJFkDncB.js',
+  '/assets/spritesheet-DpIxuf5L.svg'
 ];
 
 // Open IndexedDB
@@ -121,24 +122,52 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// Fetch event handler with better error handling and cross-origin request handling
 self.addEventListener('fetch', (event) => {
   event.respondWith(
     caches.match(event.request)
-      .then((response) => {
+      .then(response => {
         if (response) {
           return response;
         }
-        return fetch(event.request)
-          .then((response) => {
-            if (!response || response.status !== 200 || response.type !== 'basic') {
+
+        // Skip non-GET requests
+        if (event.request.method !== 'GET') {
+          return fetch(event.request);
+        }
+
+        // Handle cross-origin requests separately
+        const url = new URL(event.request.url);
+        if (url.origin !== location.origin && !url.href.includes('tile.openstreetmap.org')) {
+          return fetch(event.request);
+        }
+
+        return fetch(event.request.clone())
+          .then(response => {
+            // Don't cache non-successful responses or non-GET requests
+            if (!response || response.status !== 200) {
               return response;
             }
-            const responseToCache = response.clone();
-            caches.open(CACHE_NAME)
-              .then((cache) => {
-                cache.put(event.request, responseToCache);
-              });
+
+            // Only cache same-origin requests or OSM tiles
+            if (url.origin === location.origin || url.href.includes('tile.openstreetmap.org')) {
+              const responseToCache = response.clone();
+              caches.open(CACHE_NAME)
+                .then(cache => {
+                  cache.put(event.request, responseToCache);
+                })
+                .catch(err => console.error('Cache put error:', err));
+            }
+
             return response;
+          })
+          .catch(error => {
+            console.error('Fetch error:', error);
+            // Return cached index.html for navigation requests
+            if (event.request.mode === 'navigate') {
+              return caches.match('/');
+            }
+            throw error;
           });
       })
   );
