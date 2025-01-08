@@ -1,20 +1,19 @@
 {
-  "name": "Svelte PWA",
-  "short_name": "SveltePWA",
+  "name": "Geofencing PWA",
+  "short_name": "GeofencePWA",
+  "description": "A Progressive Web App for geofencing",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",
-  "theme_color": "#ff3e00",
+  "theme_color": "#4CAF50",
   "icons": [
     {
-      "src": "pwa-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "pwa-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png"
+      "src": "favicon.ico",
+      "sizes": "64x64",
+      "type": "image/x-icon"
     }
-  ]
+  ],
+  "orientation": "any",
+  "categories": ["utilities", "productivity"],
+  "prefer_related_applications": false
 }
