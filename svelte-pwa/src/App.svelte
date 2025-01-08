@@ -277,7 +277,9 @@
 
       // Add tile layer
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: ' OpenStreetMap contributors'
+        attribution: ' OpenStreetMap contributors',
+        maxNativeZoom: 19,    // Maximum zoom level of the tile server
+        maxZoom: 22,         // Maximum zoom level for the map
       }).addTo(map);
 
       // Initialize feature group for drawn items
