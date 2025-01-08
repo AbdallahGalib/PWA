@@ -1,6 +1,6 @@
 [build]
-  command = "npm run dev"
-  publish = "build"
+  command = "npm run build"
+  publish = ".netlify/functions-internal/render"
 
 [[redirects]]
   from = "/*"
