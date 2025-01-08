@@ -1,8 +1,16 @@
 [build]
   command = "npm run build"
-  publish = ".netlify/functions-internal/render"
+  publish = "build"
+  functions = ".netlify/functions-internal"
+
+[functions]
+  directory = ".netlify/functions-internal"
+  node_bundler = "esbuild"
 
 [[redirects]]
   from = "/*"
-  to = "/index.html"
+  to = "/.netlify/functions/render"
   status = 200
+
+[dev]
+  framework = "svelte"

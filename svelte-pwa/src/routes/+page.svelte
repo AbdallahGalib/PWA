@@ -411,7 +411,10 @@
                     type="text"
                     class="rename-input"
                     value={geofenceName}
-                    on:input={(e) => geofenceName = e.target.value}
+                    on:input={(e) => {
+                      const target = e.currentTarget;
+                      geofenceName = target.value;
+                    }}
                     on:keydown={(e) => {
                       if (e.key === 'Enter') {
                         renameGeofence(name, geofenceName);
@@ -421,15 +424,15 @@
                     }}
                   />
                 {:else}
-                  <span
-                    class="geofence-name"
+                  <button
+                    class="geofence-name-button"
                     on:click={() => {
                       selectedGeofence = fence.id;
                       geofenceName = name;
                     }}
                   >
                     {name}
-                  </span>
+                  </button>
                 {/if}
                 <span class="geofence-type">({fence.type})</span>
               </li>
@@ -547,13 +550,13 @@
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   }
 
-  .geofence-name {
+  .geofence-name-button {
     flex: 1;
     cursor: pointer;
     padding: 0.25rem 0;
   }
 
-  .geofence-name:hover {
+  .geofence-name-button:hover {
     color: #4CAF50;
   }
 
