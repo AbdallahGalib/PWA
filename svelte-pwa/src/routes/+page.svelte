@@ -373,7 +373,7 @@
           const registration = await navigator.serviceWorker.ready;
           if ('periodicSync' in registration) {
             try {
-              await registration.periodicSync.register('check-geofence', {
+              await (registration as any).periodicSync.register('check-geofence', {
                 minInterval: 15 * 60 * 1000 // Minimum 15 minutes
               });
               console.log('Periodic background sync registered');
