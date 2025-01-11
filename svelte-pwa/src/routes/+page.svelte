@@ -373,10 +373,19 @@
           const registration = await navigator.serviceWorker.ready;
           if ('periodicSync' in registration) {
             try {
-              await (registration as any).periodicSync.register('check-geofence', {
-                minInterval: 15 * 60 * 1000 // Minimum 15 minutes
+              // Check if permission is already granted
+              const status = await navigator.permissions.query({
+                name: 'periodic-background-sync' as PermissionName
               });
-              console.log('Periodic background sync registered');
+
+              if (status.state === 'granted') {
+                await (registration as any).periodicSync.register('check-geofence', {
+                  minInterval: 15 * 60 * 1000 // Minimum 15 minutes
+                });
+                console.log('Periodic background sync registered');
+              } else {
+                console.log('Periodic background sync permission not granted. Make sure the app is installed and has high site engagement.');
+              }
             } catch (error) {
               console.error('Error registering periodic sync:', error);
             }
