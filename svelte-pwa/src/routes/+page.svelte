@@ -1,11 +1,40 @@
-<!-- Move content from App.svelte here -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import L from 'leaflet';
   import 'leaflet/dist/leaflet.css';
   import 'leaflet-draw';
   import 'leaflet-draw/dist/leaflet.draw.css';
-  import type { Map as LeafletMap, FeatureGroup, Marker, Circle, LatLng } from 'leaflet';
+  import type { Map as LeafletMap, FeatureGroup, Marker, Circle, LatLng, LeafletEventHandlerFn, Layer, LayerGroup } from 'leaflet';
+  import type { Geofence } from '$lib/types';
+  import Map from '$lib/components/Map.svelte';
+  import GeofenceControls from '$lib/components/GeofenceControls.svelte';
+  import GeofenceList from '$lib/components/GeofenceList.svelte';
+  import Notifications from '$lib/components/Notifications.svelte';
+  import GeofenceRename from '$lib/components/GeofenceRename.svelte';
+
+  interface Position {
+    lat: number;
+    lng: number;
+  }
+
+  interface CircleCoordinate extends Position {
+    radius: number;
+  }
+
+  interface Geofence {
+    id: string;
+    name: string;
+    type: string;
+    coordinates: Position[] | [Position, CircleCoordinate];
+    layer: Layer;
+  }
+
+  interface DrawCreatedEvent {
+    layer: Layer;
+    layerType: 'circle' | 'polygon' | 'rectangle';
+  }
+
+  type GeofenceStore = Record<string, Geofence>;
 
   // Fix Leaflet's default icon paths
   delete (L.Icon.Default.prototype as any)._getIconUrl;
@@ -17,19 +46,19 @@
 
   let map: LeafletMap | null = null;
   let mapElement: HTMLElement;
-  let drawnItems: FeatureGroup;
-  let position: { lat: number; lng: number } | null = null;
-  let geofences: Map<string, Geofence> = new Map();
-  let selectedGeofence: any = null;
+  let drawnItems: FeatureGroup = new L.FeatureGroup();
+  let position: Position | null = null;
+  let geofences: GeofenceStore = {};
+  let selectedGeofence: string | null = null;
   let geofenceName = '';
   let status: string = '';
   let insideGeofences: string[] = [];
   let outsideGeofences: string[] = [];
   let watching = false;
   let mapInitialized = false;
-  let watchId: number | null;
-  let currentLocationMarker: L.Marker;
-  let locationCircle: L.Circle;
+  let watchId: number | null = null;
+  let currentLocationMarker: Marker;
+  let locationCircle: Circle;
   let checkInterval: number | null = null;
   let notificationPermission: NotificationPermission = 'default';
   const CHECK_INTERVAL_MS = 2 * 60 * 1000; // 2 minutes in milliseconds
@@ -43,36 +72,6 @@
     popupAnchor: [1, -34],
     shadowSize: [41, 41]
   });
-
-  interface Position {
-    lat: number;
-    lng: number;
-  }
-
-  interface Geofence {
-    id: string;
-    name: string;
-    coordinates: Position[];
-    type: string;
-    center: Position;
-    radius: number;
-    layer?: any;
-  }
-
-  interface DrawOptions {
-    draw?: {
-      polygon?: boolean;
-      polyline?: boolean;
-      rectangle?: boolean;
-      circle?: boolean;
-      circlemarker?: boolean;
-      marker?: boolean;
-    };
-    edit?: {
-      featureGroup: FeatureGroup;
-      remove?: boolean;
-    };
-  }
 
   function isPointInPolygon(point: Position, polygon: Position[]): boolean {
     let inside = false;
@@ -104,51 +103,25 @@
     return distance <= radius;
   }
 
-  function checkGeofences(currentPosition: Position | null) {
-    if (!currentPosition) return;
+  function checkGeofences(currentPosition: Position) {
+    insideGeofences = [];
+    outsideGeofences = [];
 
-    const newInsideGeofences: string[] = [];
-    const newOutsideGeofences: string[] = [];
-
-    geofences.forEach((fence, name) => {
+    for (const [name, fence] of Object.entries(geofences)) {
       let isInside = false;
 
       if (fence.type === 'circle') {
-        isInside = isPointInCircle(currentPosition, fence.center, fence.radius);
+        const [center, circleCoord] = fence.coordinates as [Position, CircleCoordinate];
+        isInside = isPointInCircle(currentPosition, center, circleCoord.radius);
       } else if (fence.type === 'polygon' || fence.type === 'rectangle') {
-        isInside = isPointInPolygon(currentPosition, fence.coordinates);
+        isInside = isPointInPolygon(currentPosition, fence.coordinates as Position[]);
       }
 
       if (isInside) {
-        newInsideGeofences.push(name);
-        if (!insideGeofences.includes(name)) {
-          if ('Notification' in window && notificationPermission === 'granted') {
-            new Notification('Geofence Alert', {
-              body: `You have entered ${name}`,
-              icon: '/vite.svg'
-            });
-          }
-        }
+        insideGeofences.push(name);
       } else {
-        newOutsideGeofences.push(name);
-        if (insideGeofences.includes(name)) {
-          if ('Notification' in window && notificationPermission === 'granted') {
-            new Notification('Geofence Alert', {
-              body: `You have left ${name}`,
-              icon: '/vite.svg'
-            });
-          }
-        }
+        outsideGeofences.push(name);
       }
-    });
-
-    insideGeofences = newInsideGeofences;
-    outsideGeofences = newOutsideGeofences;
-
-    if (insideGeofences.length > 0) {
-      status = `Inside geofence(s): ${insideGeofences.join(', ')}`;
-    } else {
-      status = 'Outside all geofences';
     }
   }
 
@@ -220,7 +193,6 @@
         maxZoom: 22
       }).addTo(map);
 
-      drawnItems = new L.FeatureGroup();
       map.addLayer(drawnItems);
 
       const drawControl = new L.Control.Draw({
@@ -240,59 +212,9 @@
 
       map.addControl(drawControl);
 
-      map.on('draw:created', (e: any) => {
-        const layer = e.layer;
-        drawnItems.addLayer(layer);
+      map.on('draw:created', handleDrawCreated);
 
-        const type = e.layerType;
-        const id = Math.random().toString(36).substr(2, 9);
-        const defaultName = `Geofence ${geofences.size + 1}`;
-
-        let geofence: Geofence;
-
-        if (type === 'circle') {
-          const center = layer.getLatLng();
-          const radius = layer.getRadius();
-          geofence = {
-            id,
-            name: defaultName,
-            type: 'circle',
-            center: { lat: center.lat, lng: center.lng },
-            radius,
-            coordinates: [],
-            layer
-          };
-        } else {
-          const coordinates = layer.getLatLngs()[0].map((latlng: LatLng) => ({
-            lat: latlng.lat,
-            lng: latlng.lng
-          }));
-          geofence = {
-            id,
-            name: defaultName,
-            type,
-            coordinates,
-            center: { lat: 0, lng: 0 },
-            radius: 0,
-            layer
-          };
-        }
-
-        geofences.set(defaultName, geofence);
-        geofences = geofences;
-      });
-
-      map.on('draw:deleted', (e: any) => {
-        const layers = e.layers;
-        layers.eachLayer((layer: any) => {
-          geofences.forEach((fence, name) => {
-            if (fence.layer === layer) {
-              geofences.delete(name);
-            }
-          });
-        });
-        geofences = geofences;
-      });
+      map.on('draw:deleted', handleDrawDeleted);
 
       if ('geolocation' in navigator) {
         navigator.geolocation.getCurrentPosition(
@@ -353,53 +275,186 @@
     }
   }
 
-  function renameGeofence(oldName: string, newName: string) {
-    if (geofences.has(oldName) && !geofences.has(newName)) {
-      const fence = geofences.get(oldName)!;
-      geofences.delete(oldName);
-      geofences.set(newName, { ...fence, name: newName });
-      geofences = geofences;
+  function handleDrawCreated(event: L.LeafletEvent) {
+    const e = event as unknown as {
+      layer: L.Layer;
+      layerType: 'circle' | 'polygon' | 'rectangle';
+    };
+
+    const layer = e.layer;
+    const type = e.layerType;
+    const id = crypto.randomUUID();
+    const defaultName = `${type}_${id.slice(0, 8)}`;
+
+    if (type === 'circle') {
+      const circle = layer as Circle;
+      const center = circle.getLatLng();
+      const radius = circle.getRadius();
+      const geofence: Geofence = {
+        id,
+        name: defaultName,
+        type: 'circle',
+        coordinates: [
+          { lat: center.lat, lng: center.lng },
+          { lat: center.lat, lng: center.lng, radius }
+        ],
+        layer
+      };
+      geofences[defaultName] = geofence;
+    } else {
+      const polygon = layer as L.Polygon;
+      const latLngs = polygon.getLatLngs();
+      const coordinates = (Array.isArray(latLngs[0]) ? latLngs[0] : latLngs) as LatLng[];
+      
+      const geofence: Geofence = {
+        id,
+        name: defaultName,
+        type,
+        coordinates: coordinates.map(latLng => ({
+          lat: latLng.lat,
+          lng: latLng.lng
+        })),
+        layer
+      };
+      geofences[defaultName] = geofence;
+    }
+
+    drawnItems.addLayer(layer);
+  }
+
+  function handleDrawDeleted(event: L.LeafletEvent) {
+    const e = event as unknown as {
+      layers: L.LayerGroup;
+    };
+
+    e.layers.eachLayer((layer: Layer) => {
+      for (const [name, fence] of Object.entries(geofences)) {
+        if (fence.layer === layer) {
+          delete geofences[name];
+          break;
+        }
+      }
+    });
+  }
+
+  function handleRename(newName: string) {
+    if (selectedGeofence && newName !== selectedGeofence) {
+      const geofence = geofences[selectedGeofence];
+      if (geofence) {
+        geofences[newName] = { ...geofence, name: newName };
+        delete geofences[selectedGeofence];
+        selectedGeofence = newName;
+        geofenceName = newName;
+      }
+    }
+  }
+
+  function handleSaveGeofence() {
+    if (selectedGeofence) {
+      const fence = geofences[selectedGeofence];
+      if (fence) {
+        const newFence = { ...fence, name: geofenceName };
+        delete geofences[selectedGeofence];
+        geofences[geofenceName] = newFence;
+        selectedGeofence = null;
+        geofenceName = '';
+      }
+    }
+  }
+
+  function handleDeleteGeofence() {
+    if (selectedGeofence) {
+      const fence = geofences[selectedGeofence];
+      if (fence && fence.layer) {
+        drawnItems.removeLayer(fence.layer);
+      }
+      delete geofences[selectedGeofence];
       selectedGeofence = null;
     }
   }
 
-  onMount(async () => {
-    if ('serviceWorker' in navigator && 'permissions' in navigator) {
-      try {
-        // Request permission for notifications
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          // Register periodic background sync
-          const registration = await navigator.serviceWorker.ready;
-          if ('periodicSync' in registration) {
-            try {
-              // Check if permission is already granted
-              const status = await navigator.permissions.query({
-                name: 'periodic-background-sync' as PermissionName
-              });
+  function handleSelectGeofence(event: CustomEvent<{ name: string }>) {
+    selectedGeofence = event.detail.name;
+    geofenceName = event.detail.name;
+  }
 
-              if (status.state === 'granted') {
-                await (registration as any).periodicSync.register('check-geofence', {
-                  minInterval: 15 * 60 * 1000 // Minimum 15 minutes
-                });
-                console.log('Periodic background sync registered');
-              } else {
-                console.log('Periodic background sync permission not granted. Make sure the app is installed and has high site engagement.');
-              }
-            } catch (error) {
-              console.error('Error registering periodic sync:', error);
-            }
-          }
-        }
-      } catch (error) {
-        console.error('Error setting up notifications:', error);
+  function handleGeofenceSelect(name: string) {
+    selectedGeofence = name;
+  }
+
+  function handleGeofenceDelete(name: string) {
+    if (geofences[name]) {
+      delete geofences[name];
+      geofences = { ...geofences }; // Trigger reactivity
+      
+      // Remove from inside/outside arrays
+      insideGeofences = insideGeofences.filter(g => g !== name);
+      outsideGeofences = outsideGeofences.filter(g => g !== name);
+      
+      // Clear selection if deleted geofence was selected
+      if (selectedGeofence === name) {
+        selectedGeofence = null;
       }
     }
+  }
 
-    if ('Notification' in window) {
-      notificationPermission = await Notification.requestPermission();
+  async function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+      try {
+        const registration = await navigator.serviceWorker.register('/service-worker.js');
+        console.log('Service Worker registered:', registration);
+
+        // Request periodic background sync
+        // @ts-ignore - periodicSync is not in the type definitions yet
+        if ('periodicSync' in registration && registration.periodicSync?.register) {
+          try {
+            // @ts-ignore - periodicSync is not in the type definitions yet
+            await registration.periodicSync.register('geofence-sync', {
+              minInterval: 60 * 1000 // Minimum interval of one minute
+            });
+            console.log('Periodic background sync registered');
+          } catch (error) {
+            console.error('Error registering periodic sync:', error);
+          }
+        }
+
+        return registration;
+      } catch (error) {
+        console.error('Service Worker registration failed:', error);
+      }
     }
-    await initializeMap();
+  }
+
+  // Request permissions only on user interaction
+  async function requestPermissions() {
+    try {
+      // Request notification permission
+      if ('Notification' in window) {
+        const permission = await Notification.requestPermission();
+        console.log('Notification permission:', permission);
+      }
+
+      // Request geolocation permission
+      if ('geolocation' in navigator) {
+        const position = await new Promise((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject);
+        });
+        console.log('Geolocation permission granted');
+        return position;
+      }
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
+    }
+  }
+
+  // Initialize app after permissions
+  async function initializeApp() {
+    await registerServiceWorker();
+    // Don't request permissions here, wait for user interaction
+  }
+
+  onMount(async () => {
+    await initializeApp();
   });
 
   onDestroy(() => {
@@ -416,222 +471,48 @@
   <meta name="description" content="A Progressive Web App for geofencing" />
 </svelte:head>
 
-<main>
-  <div class="app-container">
-    <div class="content-container">
-      <div class="status-bar">
-        <p class="status-text">{status}</p>
-        {#if watching}
-          <button class="control-button stop" on:click={stopMonitoring}>Stop Monitoring</button>
-        {:else}
-          <button class="control-button start" on:click={startMonitoring}>Start Monitoring</button>
-        {/if}
-      </div>
-
-      <div class="map-container" bind:this={mapElement}></div>
-
-      <div class="geofence-list">
-        <h3>Geofences</h3>
-        {#if geofences.size === 0}
-          <p class="no-geofences">No geofences created yet. Use the drawing tools to create one.</p>
-        {:else}
-          <ul>
-            {#each Array.from(geofences) as [name, fence] (fence.id)}
-              <li class="geofence-item">
-                {#if selectedGeofence === fence.id}
-                  <input
-                    type="text"
-                    class="rename-input"
-                    value={geofenceName}
-                    on:input={(e) => {
-                      const target = e.currentTarget;
-                      geofenceName = target.value;
-                    }}
-                    on:keydown={(e) => {
-                      if (e.key === 'Enter') {
-                        renameGeofence(name, geofenceName);
-                      } else if (e.key === 'Escape') {
-                        selectedGeofence = null;
-                      }
-                    }}
-                  />
-                {:else}
-                  <button
-                    class="geofence-name-button"
-                    on:click={() => {
-                      selectedGeofence = fence.id;
-                      geofenceName = name;
-                    }}
-                  >
-                    {name}
-                  </button>
-                {/if}
-                <span class="geofence-type">({fence.type})</span>
-              </li>
-            {/each}
-          </ul>
-        {/if}
-      </div>
+<div class="h-screen flex flex-col">
+  <div class="flex-1 relative">
+    <Map bind:map bind:mapElement bind:drawnItems />
+    
+    <div class="absolute top-4 left-4 z-[1000] space-y-4">
+      <button
+        class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+        on:click={requestPermissions}
+      >
+        Enable Notifications & Location
+      </button>
+      <GeofenceControls
+        {watching}
+        {selectedGeofence}
+        {geofenceName}
+        {status}
+        on:startMonitoring={startMonitoring}
+        on:stopMonitoring={stopMonitoring}
+        on:saveGeofence={handleSaveGeofence}
+        on:deleteGeofence={handleDeleteGeofence}
+      />
+      
+      {#if selectedGeofence}
+        <div class="bg-white p-4 rounded-lg shadow-lg">
+          <GeofenceRename
+            {selectedGeofence}
+            {geofenceName}
+            onRename={handleRename}
+          />
+        </div>
+      {/if}
+      
+      <GeofenceList
+        {geofences}
+        {selectedGeofence}
+        {insideGeofences}
+        {outsideGeofences}
+        onSelect={handleGeofenceSelect}
+        onDelete={handleGeofenceDelete}
+      />
     </div>
   </div>
-</main>
 
-<style>
-  :global(body) {
-    margin: 0;
-    padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  }
-
-  .app-container {
-    display: flex;
-    flex-direction: column;
-    height: 100vh;
-    width: 100vw;
-  }
-
-  .content-container {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    padding: 1rem;
-    gap: 1rem;
-  }
-
-  .status-bar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    background-color: #f5f5f5;
-    padding: 0.5rem 1rem;
-    border-radius: 4px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .status-text {
-    margin: 0;
-    color: #333;
-  }
-
-  .control-button {
-    padding: 0.5rem 1rem;
-    border: none;
-    border-radius: 4px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.2s;
-  }
-
-  .start {
-    background-color: #4CAF50;
-    color: white;
-  }
-
-  .start:hover {
-    background-color: #45a049;
-  }
-
-  .stop {
-    background-color: #f44336;
-    color: white;
-  }
-
-  .stop:hover {
-    background-color: #da190b;
-  }
-
-  .map-container {
-    flex: 1;
-    min-height: 0;
-    border-radius: 4px;
-    overflow: hidden;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .geofence-list {
-    background-color: #f5f5f5;
-    padding: 1rem;
-    border-radius: 4px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  }
-
-  .geofence-list h3 {
-    margin-top: 0;
-    margin-bottom: 1rem;
-    color: #333;
-  }
-
-  .no-geofences {
-    color: #666;
-    font-style: italic;
-  }
-
-  .geofence-list ul {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-  }
-
-  .geofence-item {
-    display: flex;
-    align-items: center;
-    padding: 0.5rem;
-    background-color: white;
-    margin-bottom: 0.5rem;
-    border-radius: 4px;
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
-  }
-
-  .geofence-name-button {
-    flex: 1;
-    cursor: pointer;
-    padding: 0.25rem 0;
-  }
-
-  .geofence-name-button:hover {
-    color: #4CAF50;
-  }
-
-  .geofence-type {
-    color: #666;
-    font-size: 0.9em;
-    margin-left: 0.5rem;
-  }
-
-  :global(.leaflet-container) {
-    height: 100%;
-    width: 100%;
-    background-color: #f5f5f5;
-  }
-
-  :global(.leaflet-control-attribution) {
-    background-color: rgba(255, 255, 255, 0.8) !important;
-  }
-
-  :global(.leaflet-control-attribution a) {
-    color: #4CAF50 !important;
-  }
-
-  :global(.leaflet-draw-toolbar a) {
-    background-color: white !important;
-    border: 2px solid rgba(0, 0, 0, 0.2) !important;
-  }
-
-  :global(.leaflet-draw-toolbar a:hover) {
-    background-color: #f4f4f4 !important;
-  }
-
-  .rename-input {
-    flex: 1;
-    padding: 0.25rem 0.5rem;
-    border: 1px solid #ccc;
-    border-radius: 4px;
-    margin-right: 0.5rem;
-  }
-
-  .rename-input:focus {
-    outline: none;
-    border-color: #4CAF50;
-    box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
-  }
-</style>
+  <Notifications {status} {notificationPermission} />
+</div>
